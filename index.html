@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GeoAPI | Independent Map Preview</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --accent: #10b981;
+            --bg: #0f172a;
+            --sidebar-bg: #1e293b;
+            --text: #f8fafc;
+            --text-dim: #94a3b8;
+            --card: #334155;
+            --success: #22c55e;
+            --danger: #ef4444;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Outfit', sans-serif; height: 100vh; display: flex; background: var(--bg); color: var(--text); }
+
+        #sidebar {
+            width: 400px;
+            background: var(--sidebar-bg);
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            z-index: 1000;
+            box-shadow: 10px 0 30px rgba(0,0,0,0.3);
+            overflow-y: auto;
+        }
+
+        h1 { font-size: 1.75rem; font-weight: 700; background: linear-gradient(to right, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .description { font-size: 0.85rem; color: var(--text-dim); line-height: 1.4; }
+
+        .tabs { display: flex; gap: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .tab { padding: 0.5rem 0; cursor: pointer; font-size: 0.9rem; color: var(--text-dim); position: relative; transition: color 0.2s; }
+        .tab.active { color: var(--text); font-weight: 600; }
+        .tab.active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 3px; background: var(--primary); border-radius: 3px 3px 0 0; }
+
+        .input-group { display: flex; flex-direction: column; gap: 0.75rem; }
+        label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
+        
+        input {
+            padding: 0.85rem;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            color: white;
+            font-size: 0.95rem;
+            outline: none;
+            transition: all 0.2s;
+        }
+        input:focus { border-color: var(--primary); background: rgba(255,255,255,0.08); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2); }
+
+        button {
+            padding: 1rem;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.2s;
+        }
+        button:active { transform: scale(0.98); }
+        button:hover { opacity: 0.9; }
+
+        /* Suggestions UI */
+        .autocomplete-list, #candidates-list {
+            background: var(--card);
+            border-radius: 12px;
+            margin-top: 0.5rem;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .candidate-item, .autocomplete-item {
+            padding: 1rem;
+            cursor: pointer;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            transition: background 0.2s;
+        }
+        .candidate-item:hover, .autocomplete-item:hover { background: rgba(255,255,255,0.05); }
+        .candidate-item.selected { background: rgba(99, 102, 241, 0.2); border-left: 4px solid var(--primary); }
+
+        .item-name { font-weight: 600; font-size: 0.9rem; display: block; margin-bottom: 0.25rem; }
+        .item-meta { font-size: 0.75rem; color: var(--text-dim); display: flex; justify-content: space-between; }
+
+        #map { flex-grow: 1; height: 100%; z-index: 1; }
+
+        .loader { display: none; width: 18px; height: 18px; border: 2px solid white; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Risk Badge */
+        .risk-badge { padding: 4px 10px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; }
+        .risk-LOW { background: rgba(34, 197, 94, 0.2); color: #4ade80; }
+        .risk-MEDIUM { background: rgba(234, 179, 8, 0.2); color: #fde047; }
+        .risk-HIGH { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+
+        .input-container { position: relative; }
+        .autocomplete-list { position: absolute; width: 100%; z-index: 2000; display: none; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        .candidate-item {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px;
+            padding: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 0.5rem;
+        }
+        .candidate-item:hover {
+            background: rgba(255,255,255,0.1);
+            transform: translateX(4px);
+        }
+        .item-name {
+            font-weight: 600;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .location-pulse-btn {
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 1rem;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .landmark-card {
+            background: rgba(99, 102, 241, 0.1);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 12px;
+            padding: 1rem;
+            margin-top: 1rem;
+            display: none;
+        }
+
+        .landmark-title {
+            color: var(--primary);
+            font-size: 0.7rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 0.5rem;
+        }
+
+        .landmark-address {
+            font-size: 1.1rem;
+            font-weight: 600;
+            line-height: 1.3;
+        }
+
+        .landmark-meta {
+            margin-top: 0.5rem;
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            display: flex;
+            gap: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <div>
+            <h1>GeoAPI Live</h1>
+            <div class="input-group" style="margin-top: 1rem;">
+                <label>Current Territory</label>
+                <select id="global-city" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: white; padding: 0.5rem; outline: none; width: 100%;">
+                    <option value="Benin City">Benin City</option>
+                    <option value="Lagos State">Lagos State</option>
+                    <option value="Abuja">Abuja</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('geocode')">Search</div>
+            <div class="tab" onclick="switchTab('route')">Routing</div>
+            <div class="tab" onclick="switchTab('ai')">AI Research</div>
+        </div>
+
+        <!-- Search Tab -->
+        <div id="geocode-section" class="input-group">
+            <label>Informal Location</label>
+            <input type="text" id="address" placeholder="e.g. beside UNIBEN gate" value="beside UNIBEN main gate">
+            <button onclick="handleGeocode()">
+                <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
+                    <span>Find Location</span>
+                    <div id="geocode-loader" class="loader"></div>
+                </div>
+            </button>
+            <button class="location-pulse-btn" onclick="handleCurrentLocation()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                <span>Use My Location</span>
+                <div id="location-loader" class="loader"></div>
+            </button>
+            <div id="candidates-list"></div>
+        </div>
+
+        <!-- Route Tab -->
+        <div id="route-section" class="input-group" style="display: none;">
+            <label>Start Point (Enter to search)</label>
+            <div class="input-container">
+                <input type="text" id="origin" placeholder="Search origin..." onkeydown="handleEnterSearch(event, 'origin')">
+                <div id="origin-suggestions" class="autocomplete-list"></div>
+            </div>
+            <label style="margin-top: 0.5rem;">End Point (Enter to search)</label>
+            <div class="input-container">
+                <input type="text" id="destination" placeholder="Search destination..." onkeydown="handleEnterSearch(event, 'destination')">
+                <div id="destination-suggestions" class="autocomplete-list"></div>
+            </div>
+            <button onclick="handleRoute()">Calculate Safe Path</button>
+        </div>
+
+        <!-- AI Research Tab -->
+        <div id="ai-section" class="input-group" style="display: none;">
+            <label>AI Mission Prompt</label>
+            <textarea id="ai-mission" placeholder="e.g. Find all branches of GTBank in Benin City and map them." style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: white; padding: 0.85rem; height: 100px; font-family: inherit; outline: none; margin-bottom: 0.5rem;"></textarea>
+            <button onclick="handleAIMission()" id="ai-btn" style="background: #c084fc; width: 100%; border: none; border-radius: 12px; padding: 1rem; color: white; font-weight: 600; cursor: pointer; margin-bottom: 0.5rem;">
+                <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
+                    <span>Launch AI Mission</span>
+                    <div id="ai-loader" class="loader"></div>
+                </div>
+            </button>
+            <p id="ai-status" style="font-size: 0.75rem; color: var(--text-dim); text-align: center; margin-bottom: 1rem;"></p>
+            
+            <div id="ai-review-queue" style="display: none; flex-direction: column; gap: 0.5rem; max-height: 400px; overflow-y: auto; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <label style="color: var(--primary); font-weight: 700;">Review Queue</label>
+                    <div style="display: flex; gap: 5px;">
+                        <button onclick="bulkApprove()" style="padding: 4px 8px; font-size: 0.65rem; background: var(--success); border: none; border-radius: 4px; color: white; cursor: pointer;">Approve All</button>
+                        <button onclick="bulkDelete()" style="padding: 4px 8px; font-size: 0.65rem; background: var(--danger); border: none; border-radius: 4px; color: white; cursor: pointer;">Clear</button>
+                    </div>
+                </div>
+                <div id="queue-list"></div>
+            </div>
+        </div>
+
+        <!-- Results Area -->
+        <div id="results" style="display: none; background: rgba(255,255,255,0.03); padding: 1rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);">
+            <div id="geo-results">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                    <span id="res-risk-badge" class="risk-badge">Low Risk</span>
+                    <span id="res-coords" style="font-size: 0.8rem; color: var(--text-dim);">6.335, 5.624</span>
+                </div>
+                
+                <div id="delivery-sim" style="border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 1rem;">
+                    <p style="font-size: 0.7rem; color: var(--accent); margin-bottom: 0.5rem; font-weight: 700;">LIVE LOGISTICS TEST</p>
+                    <button onclick="handleSimulateDelivery()" style="background: var(--accent); width: 100%; padding: 0.75rem; font-size: 0.85rem;">Confirm Delivery at Pin</button>
+                    <p id="delivery-status" style="font-size: 0.7rem; margin-top: 0.5rem; text-align: center; color: var(--text-dim);"></p>
+                </div>
+
+                <div id="landmark-display" class="landmark-card">
+                    <p class="landmark-title">Resolved Nigerian Address</p>
+                    <p id="res-landmark-addr" class="landmark-address">Near GTBank, Jibowu</p>
+                    <div class="landmark-meta">
+                        <span id="res-landmark-dist">40m away</span>
+                        <span id="res-landmark-conf">95% Conf.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <script>
+        const API_KEY = "geo_live_oI-A0P_3xCFkDGGc0I4eTqTh_dI7QtQlmWs62kGGAfE";
+        const BASE_URL = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" 
+            ? "https://geoapi-6wt7.onrender.com/api/v1" 
+            : "https://geoapi-6wt7.onrender.com/api/v1";
+
+        const map = L.map('map', { zoomControl: false }).setView([6.335, 5.6247], 13);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        // FREE Standard OpenStreetMap Tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap',
+            maxZoom: 19
+        }).addTo(map);
+
+        const CITY_COORDS = {
+            "Benin City": [6.335, 5.6247],
+            "Lagos State": [6.5244, 3.3792],
+            "Abuja": [9.0579, 7.4951]
+        };
+
+        document.getElementById('global-city').addEventListener('change', (e) => {
+            const coords = CITY_COORDS[e.target.value];
+            if (coords) map.flyTo(coords, 13);
+        });
+
+        let currentMarker = null;
+
+        // Map Click (Manual Pin Drop)
+        map.on('click', (e) => {
+            updateMap(e.latlng.lat, e.latlng.lng, "Manual Point");
+            document.getElementById('results').style.display = 'block';
+            document.getElementById('delivery-sim').style.display = 'block';
+        });
+
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('geocode-section').style.display = tab === 'geocode' ? 'flex' : 'none';
+            document.getElementById('route-section').style.display = tab === 'route' ? 'flex' : 'none';
+            document.getElementById('ai-section').style.display = tab === 'ai' ? 'flex' : 'none';
+            document.getElementById('results').style.display = 'none';
+        }
+
+        async function handleGeocode() {
+            const address = document.getElementById('address').value;
+            const city = document.getElementById('global-city').value;
+            const loader = document.getElementById('geocode-loader');
+            const list = document.getElementById('candidates-list');
+            
+            loader.style.display = 'block';
+            list.innerHTML = '';
+
+            try {
+                const resp = await fetch(`${BASE_URL}/geocode/`, {
+                    method: 'POST',
+                    headers: { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ raw_input: address, city: city })
+                });
+                const data = await resp.json();
+
+                if (data.candidates && data.candidates.length > 0) {
+                    data.candidates.forEach(cand => {
+                        const div = document.createElement('div');
+                        div.className = 'candidate-item';
+                        div.innerHTML = `
+                            <span class="item-name">${cand.name}</span>
+                            <div class="item-meta">
+                                <span>${cand.category ? cand.category.toUpperCase() : 'LANDMARK'}</span>
+                                <span>${(cand.confidence * 100).toFixed(0)}% Match</span>
+                            </div>
+                        `;
+                        div.onclick = () => selectCandidate(cand, address, div);
+                        list.appendChild(div);
+                    });
+                    // Select first by default
+                    selectCandidate(data.candidates[0], address, list.firstChild);
+                }
+            } catch (err) { alert(err.message); }
+            finally { loader.style.display = 'none'; }
+        }
+
+        async function selectCandidate(cand, originalAddress, element) {
+            document.querySelectorAll('.candidate-item').forEach(i => i.classList.remove('selected'));
+            element.classList.add('selected');
+            updateMap(cand.lat, cand.lng, cand.name);
+            
+            const city = document.getElementById('global-city').value;
+            const riskResp = await fetch(`${BASE_URL}/risk/`, {
+                method: 'POST',
+                headers: { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ raw_address: originalAddress, city: city })
+            });
+            const riskData = await riskResp.json();
+            
+            document.getElementById('results').style.display = 'block';
+            document.getElementById('res-coords').innerText = `${cand.lat.toFixed(4)}, ${cand.lng.toFixed(4)}`;
+            const badge = document.getElementById('res-risk-badge');
+            badge.innerText = riskData.risk_level + " Risk";
+            badge.className = `risk-badge risk-${riskData.risk_level}`;
+            document.getElementById('delivery-sim').style.display = 'block';
+            document.getElementById('landmark-display').style.display = 'none';
+        }
+
+        async function handleCurrentLocation() {
+            const loader = document.getElementById('location-loader');
+            loader.style.display = 'block';
+
+            if (!navigator.geolocation) {
+                alert("Geolocation is not supported by your browser");
+                loader.style.display = 'none';
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(async (position) => {
+                const { latitude, longitude } = position.coords;
+                
+                try {
+                    // Call our new Reverse Geocoding Service
+                    const resp = await fetch(`${BASE_URL}/reverse-geocode/`, {
+                        method: 'POST',
+                        headers: { 
+                            'X-API-Key': API_KEY, 
+                            'Content-Type': 'application/json' 
+                        },
+                        body: JSON.stringify({ lat: latitude, lng: longitude })
+                    });
+                    const data = await resp.json();
+
+                    if (resp.ok) {
+                        // Update UI
+                        updateMap(latitude, longitude, data.primary_address);
+                        document.getElementById('results').style.display = 'block';
+                        document.getElementById('res-coords').innerText = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+                        document.getElementById('landmark-display').style.display = 'block';
+                        document.getElementById('delivery-sim').style.display = 'none';
+                        
+                        document.getElementById('res-landmark-addr').innerText = data.primary_address;
+                        document.getElementById('res-landmark-dist').innerText = `${data.distance_to_landmark_meters}m away`;
+                        document.getElementById('res-landmark-conf').innerText = `${(data.confidence * 100).toFixed(0)}% Conf.`;
+                        
+                        // Set risk badge to neutral for GPS points
+                        const badge = document.getElementById('res-risk-badge');
+                        badge.innerText = "GPS Verified";
+                        badge.className = "risk-badge risk-LOW";
+                    }
+                } catch (err) {
+                    alert("Reverse Geocoding Failed: " + err.message);
+                } finally {
+                    loader.style.display = 'none';
+                }
+            }, (err) => {
+                alert("Error getting location: " + err.message);
+                loader.style.display = 'none';
+            });
+        }
+
+        function updateMap(lat, lng, name, candidateId = null) {
+            if (currentMarker) map.removeLayer(currentMarker);
+            
+            const markerOptions = candidateId ? { draggable: true } : {};
+            currentMarker = L.marker([lat, lng], markerOptions).addTo(map);
+            
+            if (candidateId) {
+                currentMarker.on('dragend', async function(e) {
+                    const newPos = e.target.getLatLng();
+                    // Update backend with corrected position
+                    await fetch(`${BASE_URL}/ai/candidates/${candidateId}?lat=${newPos.lat}&lng=${newPos.lng}`, {
+                        method: 'PATCH',
+                        headers: { 'X-API-Key': API_KEY }
+                    });
+                    fetchCandidates(); // Refresh list to show new coords
+                });
+                currentMarker.bindPopup(`<b>DRAFT: ${name}</b><br>Drag me to the correct spot!`).openPopup();
+            } else {
+                currentMarker.bindPopup(`<b>${name}</b>`).openPopup();
+            }
+            
+            map.flyTo([lat, lng], 16);
+        }
+
+        async function handleEnterSearch(event, type) {
+            if (event.key !== "Enter") return;
+            const query = event.target.value;
+            const city = document.getElementById('global-city').value;
+            const sug = document.getElementById(`${type}-suggestions`);
+            sug.innerHTML = '<div class="autocomplete-item">Searching...</div>';
+            sug.style.display = 'block';
+
+            const resp = await fetch(`${BASE_URL}/geocode/`, {
+                method: 'POST',
+                headers: { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ raw_input: query, city: city })
+            });
+            const data = await resp.json();
+            
+            sug.innerHTML = '';
+            data.candidates.forEach(cand => {
+                const item = document.createElement('div');
+                item.className = 'autocomplete-item';
+                item.innerHTML = `<span class="item-name">${cand.name}</span><small style="color:var(--text-dim)">${cand.category || 'Landmark'}</small>`;
+                item.onclick = () => {
+                    document.getElementById(type).value = cand.name;
+                    sug.style.display = 'none';
+                    updateMap(cand.lat, cand.lng, cand.name);
+                };
+                sug.appendChild(item);
+            });
+        }
+
+        async function handleSimulateDelivery() {
+            const pos = currentMarker.getLatLng();
+            const status = document.getElementById('delivery-status');
+            status.innerText = "Recording trace...";
+
+            const resp = await fetch(`${BASE_URL}/analytics/traces/`, {
+                method: 'POST',
+                headers: { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    raw_address: document.getElementById('address').value,
+                    actual_lat: pos.lat,
+                    actual_lng: pos.lng,
+                    success: true
+                })
+            });
+            if (resp.ok) {
+                status.innerText = "✅ Trace Saved! Map Updated.";
+                status.style.color = "var(--accent)";
+            }
+        }
+
+        async function handleAIMission() {
+            const prompt = document.getElementById('ai-mission').value;
+            const city = document.getElementById('global-city').value;
+            const btn = document.getElementById('ai-btn');
+            const loader = document.getElementById('ai-loader');
+            const status = document.getElementById('ai-status');
+
+            if (!prompt) return;
+
+            btn.disabled = true;
+            loader.style.display = 'block';
+            status.innerText = "Researching benchmarks and verifying locations...";
+
+            try {
+                const resp = await fetch(`${BASE_URL}/ai/mission/`, {
+                    method: 'POST',
+                    headers: { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mission: prompt, city: city })
+                });
+                const data = await resp.json();
+
+                if (resp.ok) {
+                    status.innerText = `AI found ${data.count} candidates for review!`;
+                    status.style.color = "var(--accent)";
+                    fetchCandidates(); // Load the queue
+                } else {
+                    throw new Error(data.detail || "Mission failed");
+                }
+            } catch (err) {
+                status.innerText = "❌ Error: " + err.message;
+                status.style.color = "var(--danger)";
+            } finally {
+                loader.style.display = 'none';
+                btn.disabled = false;
+            }
+        }
+
+        async function fetchCandidates() {
+            const resp = await fetch(`${BASE_URL}/ai/candidates/`, {
+                headers: { 'X-API-Key': API_KEY }
+            });
+            const cands = await resp.json();
+            const list = document.getElementById('queue-list');
+            const queueDiv = document.getElementById('ai-review-queue');
+            
+            list.innerHTML = '';
+            if (cands.length > 0) {
+                queueDiv.style.display = 'flex';
+                cands.forEach(c => {
+                    const div = document.createElement('div');
+                    div.className = 'candidate-item';
+                    div.innerHTML = `
+                        <div style="display:flex; justify-content:space-between; align-items:start;">
+                            <div>
+                                <span class="item-name">${c.name}</span>
+                                <small style="color:var(--text-dim); display:block; font-size:0.65rem;">${c.lat.toFixed(4)}, ${c.lng.toFixed(4)}</small>
+                            </div>
+                            <div style="display:flex; gap:5px;">
+                                <button onclick="approveCand('${c.id}', event)" style="padding:4px 8px; font-size:0.7rem; background:var(--success); border:none; border-radius:4px; color:white; cursor:pointer;">✅</button>
+                                <button onclick="rejectCand('${c.id}', event)" style="padding:4px 8px; font-size:0.7rem; background:var(--danger); border:none; border-radius:4px; color:white; cursor:pointer;">🗑️</button>
+                            </div>
+                        </div>
+                    `;
+                    div.onclick = () => updateMap(c.lat, c.lng, c.name, c.id);
+                    list.appendChild(div);
+                });
+            } else {
+                queueDiv.style.display = 'none';
+            }
+        }
+
+        async function approveCand(id, e) {
+            e.stopPropagation();
+            const resp = await fetch(`${BASE_URL}/ai/candidates/${id}/approve`, {
+                method: 'POST',
+                headers: { 'X-API-Key': API_KEY }
+            });
+            if (resp.ok) fetchCandidates();
+        }
+
+        async function rejectCand(id, e) {
+            e.stopPropagation();
+            const resp = await fetch(`${BASE_URL}/ai/candidates/${id}`, {
+                method: 'DELETE',
+                headers: { 'X-API-Key': API_KEY }
+            });
+            if (resp.ok) fetchCandidates();
+        }
+
+        async function bulkApprove() {
+            if (!confirm("Approve all candidates in the queue?")) return;
+            const resp = await fetch(`${BASE_URL}/ai/candidates/bulk-approve`, {
+                method: 'POST',
+                headers: { 'X-API-Key': API_KEY }
+            });
+            if (resp.ok) {
+                alert("Success! Main database updated.");
+                fetchCandidates();
+            }
+        }
+
+        async function bulkDelete() {
+            if (!confirm("Clear the entire review queue?")) return;
+            const resp = await fetch(`${BASE_URL}/ai/candidates/bulk-delete`, {
+                method: 'DELETE',
+                headers: { 'X-API-Key': API_KEY }
+            });
+            if (resp.ok) fetchCandidates();
+        }
+
+        // Load queue on startup
+        setTimeout(fetchCandidates, 1000);
+
+        // Close autocompletes
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.input-container')) {
+                document.querySelectorAll('.autocomplete-list').forEach(l => l.style.display = 'none');
+            }
+        });
+    </script>
+</body>
+</html>
