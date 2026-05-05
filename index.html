@@ -178,9 +178,10 @@
             <div class="input-group" style="margin-top: 1rem;">
                 <label>Current Territory</label>
                 <select id="global-city" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: white; padding: 0.5rem; outline: none; width: 100%;">
-                    <option value="Benin City">Benin City</option>
+                    <option value="" disabled selected>Select Territory</option>
                     <option value="Lagos State">Lagos State</option>
                     <option value="Abuja">Abuja</option>
+                    <option value="Benin City">Benin City</option>
                 </select>
             </div>
         </div>
@@ -410,7 +411,16 @@
 
                     if (resp.ok) {
                         // Update UI
-                        updateMap(latitude, longitude, data.primary_address);
+                        // Auto-update global territory dropdown if city is found
+                        if (data.city) {
+                            const citySelect = document.getElementById('global-city');
+                            for (let option of citySelect.options) {
+                                if (data.city.includes(option.value)) {
+                                    citySelect.value = option.value;
+                                    break;
+                                }
+                            }
+                        }
                         document.getElementById('results').style.display = 'block';
                         document.getElementById('res-coords').innerText = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
                         document.getElementById('landmark-display').style.display = 'block';
@@ -517,7 +527,14 @@
             const loader = document.getElementById('ai-loader');
             const status = document.getElementById('ai-status');
 
-            if (!prompt) return;
+            if (!prompt) {
+                alert("Please enter a mission prompt (e.g. Find all banks in Ikeja)");
+                return;
+            }
+            if (!city) {
+                alert("Please select a Territory first so the AI knows where to look.");
+                return;
+            }
 
             btn.disabled = true;
             loader.style.display = 'block';
